@@ -10,7 +10,7 @@ import (
 	"github.com/slack-go/slack/socketmode"
 )
 
-func NewEventService(ctx context.Context, csmService *EthService, logger zerolog.Logger, slackClient *slack.Client) error {
+func NewEventService(ctx context.Context, ethService *EthService, logger zerolog.Logger, slackClient *slack.Client) error {
 	client := socketmode.New(
 		slackClient,
 	)
@@ -38,7 +38,7 @@ func NewEventService(ctx context.Context, csmService *EthService, logger zerolog
 
 					client.Ack(*evt.Request)
 
-					err := handleSlashCommand(csmService, &command)
+					err := handleSlashCommand(ethService, &command)
 					if err != nil {
 						slackChan <- postErr(err)
 					}
