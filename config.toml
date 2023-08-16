@@ -1,0 +1,6 @@
+[network_map.eth]
+check_url = "http://104.197.233.185:8000/subgraphs/name/ojo-network/unidexer"
+truth_url = "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3"
+base_asset = "ETH"
+deviation = 0
+cron_interval = "20s"
