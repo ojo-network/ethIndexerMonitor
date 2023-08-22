@@ -76,6 +76,31 @@ func checkPriceAttachment(check, truth float64, assetName, network string) slack
 	return attachment
 }
 
+func listAttachment(network string, assets, ids []string) slack.Attachment {
+	attachment := slack.Attachment{
+		Pretext: fmt.Sprintf("*Network*: %s", network),
+		Color:   "good",
+		Fields: []slack.AttachmentField{
+			{
+				Title: "Network",
+				Value: fmt.Sprintf("```%s```", network),
+				Short: false,
+			},
+		},
+		Footer: "Monitor Bot",
+		Ts:     json.Number(strconv.FormatInt(time.Now().Unix(), 10)),
+	}
+
+	for i, asset := range assets {
+		attachment.Fields = append(attachment.Fields, slack.AttachmentField{
+			Value: fmt.Sprintf("```%s - %s```", asset, ids[i]),
+			Short: false,
+		})
+	}
+
+	return attachment
+}
+
 func postErr(err error) slack.Attachment {
 	attachment := slack.Attachment{
 		Pretext: "An error has occurred:",

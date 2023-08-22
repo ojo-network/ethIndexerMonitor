@@ -258,3 +258,20 @@ func (ec *EthService) getPrices(network, assetName string) (float64, float64, er
 
 	return pool.truePrice, pool.expectedPrice, nil
 }
+
+func (ec *EthService) getAllTokenNames(network string) (names []string, ids []string, err error) {
+	service, found := ec.services[network]
+	if !found {
+		err = fmt.Errorf("network %s not found", network)
+		return
+	}
+
+	service.mut.Lock()
+	defer service.mut.Unlock()
+	for assetName, id := range service.assetIdMap {
+		names = append(names, assetName)
+		ids = append(ids, id)
+	}
+
+	return
+}
