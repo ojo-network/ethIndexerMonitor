@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,11 +17,20 @@ import (
 )
 
 type (
-	BundleQuery struct {
-		Bundle struct {
-			EthPriceUSD string `graphql:"ethPriceUSD"`
-			ID          string `graphql:"id"`
-		} `graphql:"bundle(id: \"1\")"`
+	Pool struct {
+		ID          string `graphql:"id"`
+		Token0Price string `graphql:"token0Price"`
+		Token1Price string `graphql:"token1Price"`
+		Token0      struct {
+			ID string `graphql:"id"`
+		} `json:"token0"`
+		Token1 struct {
+			ID string `graphql:"id"`
+		} `json:"token1"`
+	}
+
+	Data struct {
+		Pools []Pool `graphql:"pools(where:{id_in: $ids})"`
 	}
 
 	ethChecker struct {
@@ -28,14 +38,23 @@ type (
 		network      string
 		truthUrl     *gql.Client
 		checkUrl     *gql.Client
-		baseAsset    string
 		deviation    float64
 		cronDuration time.Duration
 
-		truth float64
-		check float64
-
 		mut sync.Mutex
+
+		//id to map detail
+		pools map[string]*PoolDetail
+
+		//asset name to id
+
+		assetIdMap map[string]string
+	}
+
+	PoolDetail struct {
+		config.Pool
+		truePrice     float64
+		expectedPrice float64
 	}
 
 	EthService struct {
@@ -51,11 +70,10 @@ func StartEthServices(ctx context.Context, logger zerolog.Logger, config config.
 
 	for network, details := range config.NetworkMap {
 		cronDuration, _ := time.ParseDuration(details.CronInterval)
-		service := newEthMonitorService(ctx, eLogger, details.Deviation, network, details.TruthUrl, details.CheckUrl, details.BaseAsset, cronDuration)
+		service := newEthMonitorService(ctx, eLogger, details.Deviation, network, details.TruthUrl, details.CheckUrl, cronDuration, details.Pools)
 		es.services[network] = service
 
 		eLogger.Info().Str("network", network).
-			Str("base_asset", details.BaseAsset).
 			Str("check_url", details.CheckUrl).
 			Str("truth_url", details.TruthUrl).
 			Msg("monitoring")
@@ -64,7 +82,15 @@ func StartEthServices(ctx context.Context, logger zerolog.Logger, config config.
 	return &es
 }
 
-func newEthMonitorService(ctx context.Context, logger zerolog.Logger, deviation float64, network, truthUrl, checkUrl, baseAsset string, cronDuration time.Duration) *ethChecker {
+func newEthMonitorService(ctx context.Context, logger zerolog.Logger, deviation float64, network, truthUrl, checkUrl string, cronDuration time.Duration, pools []config.Pool) *ethChecker {
+	poolIndex := make(map[string]*PoolDetail)
+	assetIdMap := make(map[string]string)
+	for _, pool := range pools {
+		pool.TokenAddress = strings.ToLower(pool.TokenAddress)
+		poolIndex[strings.ToLower(pool.Address)] = &PoolDetail{pool, 0, 0}
+		assetIdMap[strings.ToLower(pool.TokenName)] = pool.Address
+	}
+
 	service := &ethChecker{
 		logger:       logger.With().Str("network", network).Logger(),
 		deviation:    deviation,
@@ -72,15 +98,21 @@ func newEthMonitorService(ctx context.Context, logger zerolog.Logger, deviation 
 		cronDuration: cronDuration,
 		truthUrl:     gql.NewClient(truthUrl, nil),
 		checkUrl:     gql.NewClient(checkUrl, nil),
-		baseAsset:    baseAsset,
+		pools:        poolIndex,
+		assetIdMap:   assetIdMap,
 	}
 
-	go service.startCron(ctx)
+	go service.startCron(ctx, pools)
 
 	return service
 }
 
-func (es *ethChecker) startCron(ctx context.Context) {
+func (es *ethChecker) startCron(ctx context.Context, pools []config.Pool) {
+	ids := make([]string, len(pools))
+	for i, pool := range pools {
+		ids[i] = pool.Address
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -88,7 +120,7 @@ func (es *ethChecker) startCron(ctx context.Context) {
 			return
 
 		default:
-			err := es.checkAssetPrice(ctx)
+			err := es.checkAssetPrice(ctx, ids)
 			if err != nil {
 				es.logger.Err(err).
 					Str("network", es.network).
@@ -100,31 +132,32 @@ func (es *ethChecker) startCron(ctx context.Context) {
 	}
 }
 
-func (es *ethChecker) checkAssetPrice(ctx context.Context) error {
+func (es *ethChecker) checkAssetPrice(ctx context.Context, ids []string) error {
 	g, _ := errgroup.WithContext(ctx)
 	var (
-		truth float64
-		check float64
+		truth Data
+		check Data
 	)
 
 	g.Go(func() error {
-		price, err := GetBundle(es.truthUrl)
+		ids := ids
+		priceData, err := GetPrices(es.truthUrl, ids)
 		if err != nil {
 			return err
 		}
 
-		truth = price
+		truth = priceData
 
 		return nil
 	})
 
 	g.Go(func() error {
-		price, err := GetBundle(es.checkUrl)
+		priceData, err := GetPrices(es.checkUrl, ids)
 		if err != nil {
 			return err
 		}
 
-		check = price
+		check = priceData
 
 		return nil
 	})
@@ -134,35 +167,78 @@ func (es *ethChecker) checkAssetPrice(ctx context.Context) error {
 		return err
 	}
 
-	if truth != check {
-		// check deviation
-		if (math.Abs(truth-check)/truth)*100 > es.deviation {
-			slackChan <- createMismatchedDeviationAttachment(
-				truth,
-				check,
-				es.network,
-				es.baseAsset,
-			)
+	truthIndex := make(map[string]Pool)
+	for _, truth := range truth.Pools {
+		truthIndex[truth.ID] = truth
+	}
+	for _, check := range check.Pools {
+		if truth, found := truthIndex[check.ID]; !found {
+			// asset not found error
+			es.logger.Err(fmt.Errorf("%s asset not found", check.ID)).Send()
+			continue
+		} else {
+			var truePrice, expectedPrice float64
+			var tokenName = es.pools[check.ID].TokenName
+
+			switch es.pools[check.ID].TokenAddress {
+			// quote for a specific base
+			case check.Token0.ID:
+				truePrice, err = strconv.ParseFloat(truth.Token1Price, 64)
+				if err != nil {
+					return err
+				}
+
+				expectedPrice, err = strconv.ParseFloat(check.Token1Price, 64)
+				if err != nil {
+					return err
+				}
+
+			case check.Token1.ID:
+				truePrice, err = strconv.ParseFloat(truth.Token0Price, 64)
+				if err != nil {
+					return err
+				}
+
+				expectedPrice, err = strconv.ParseFloat(check.Token0Price, 64)
+				if err != nil {
+					return err
+				}
+			}
+
+			if truePrice != expectedPrice {
+				if (math.Abs(truePrice-expectedPrice)/truePrice)*100 > es.deviation {
+					slackChan <- createMismatchedDeviationAttachment(
+						truePrice,
+						expectedPrice,
+						es.network,
+						tokenName,
+					)
+				}
+			}
+
+			pool := es.pools[check.ID]
+			pool.expectedPrice = expectedPrice
+			pool.truePrice = truePrice
 		}
 	}
-
-	es.check = check
-	es.truth = truth
 
 	return nil
 }
 
-func GetBundle(c *gql.Client) (float64, error) {
-	var bundle BundleQuery
-	err := c.Query(context.Background(), &bundle, nil)
+func GetPrices(c *gql.Client, ids []string) (Data, error) {
+	var bundle Data
+	err := c.Query(context.Background(), &bundle, map[string]interface{}{
+		"ids": ids,
+	})
+
 	if err != nil {
-		return 0, err
+		return Data{}, err
 	}
 
-	return strconv.ParseFloat(bundle.Bundle.EthPriceUSD, 64)
+	return bundle, nil
 }
 
-func (ec *EthService) getPrices(network string) (float64, float64, error) {
+func (ec *EthService) getPrices(network, assetName string) (float64, float64, error) {
 	service, found := ec.services[network]
 	if !found {
 		return 0, 0, fmt.Errorf("network %s not found", network)
@@ -170,6 +246,15 @@ func (ec *EthService) getPrices(network string) (float64, float64, error) {
 
 	service.mut.Lock()
 	defer service.mut.Unlock()
+	id, found := service.assetIdMap[assetName]
+	if !found {
+		return 0, 0, fmt.Errorf("asset %s not found on network %s", assetName, network)
+	}
 
-	return service.check, service.truth, nil
+	pool, found := service.pools[id]
+	if !found {
+		return 0, 0, fmt.Errorf("asset %s not synced on indexer %s", assetName, network)
+	}
+
+	return pool.truePrice, pool.expectedPrice, nil
 }

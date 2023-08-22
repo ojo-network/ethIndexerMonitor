@@ -1,6 +1,15 @@
 [network_map.eth]
-check_url = "http://104.197.233.185:8000/subgraphs/name/ojo-network/unidexer"
+check_url = "https://api.studio.thegraph.com/query/46403/unidexer/version/latest"
 truth_url = "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3"
-base_asset = "ETH"
-deviation = 0
+deviation = 2
 cron_interval = "20s"
+
+[[network_map.eth.pools]]
+address = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
+token_name = "WETH"
+token_address = "0xc02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+
+[[network_map.eth.pools]]
+address = "0xa4e0faa58465a2d369aa21b3e42d43374c6f9613"
+token_name = "rETH"
+token_address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"

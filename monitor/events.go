@@ -56,16 +56,15 @@ func handleSlashCommand(es *EthService, command *slack.SlashCommand) error {
 		return fmt.Errorf("no network")
 	}
 
-	network := commands[0]
+	network, tokenName := commands[0], commands[1]
 	switch command.Command {
 	case "/netstatus":
-		check, truth, err := es.getPrices(network)
+		check, truth, err := es.getPrices(network, tokenName)
 		if err != nil {
 			return err
 		}
 
-		slackChan <- checkPriceAttachment(check, truth, network)
-
+		slackChan <- checkPriceAttachment(check, truth, tokenName, network)
 	}
 	return nil
 }

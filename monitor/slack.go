@@ -43,7 +43,7 @@ func createMismatchedDeviationAttachment(truthPrice, checkPrice float64, network
 	return attachment
 }
 
-func checkPriceAttachment(check, truth float64, network string) slack.Attachment {
+func checkPriceAttachment(check, truth float64, assetName, network string) slack.Attachment {
 	attachment := slack.Attachment{
 		Pretext: fmt.Sprintf("*Network*: %s", network),
 		Color:   "good",
@@ -51,6 +51,11 @@ func checkPriceAttachment(check, truth float64, network string) slack.Attachment
 			{
 				Title: "Network",
 				Value: fmt.Sprintf("```%s```", network),
+				Short: false,
+			},
+			{
+				Title: "Asset Name",
+				Value: fmt.Sprintf("```%s```", assetName),
 				Short: false,
 			},
 			{
