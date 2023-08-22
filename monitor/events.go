@@ -56,16 +56,27 @@ func handleSlashCommand(es *EthService, command *slack.SlashCommand) error {
 		return fmt.Errorf("no network")
 	}
 
-	network := commands[0]
 	switch command.Command {
 	case "/netstatus":
-		check, truth, err := es.getPrices(network)
+		if len(commands) < 2 {
+			return fmt.Errorf("no token name")
+		}
+
+		network, tokenName := commands[0], commands[1]
+		check, truth, err := es.getPrices(network, tokenName)
 		if err != nil {
 			return err
 		}
 
-		slackChan <- checkPriceAttachment(check, truth, network)
+		slackChan <- checkPriceAttachment(check, truth, tokenName, network)
 
+	case "/listassets":
+		names, ids, err := es.getAllTokenNames(commands[0])
+		if err != nil {
+			return err
+		}
+
+		slackChan <- listAttachment(commands[0], names, ids)
 	}
 	return nil
 }

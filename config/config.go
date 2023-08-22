@@ -14,14 +14,20 @@ type (
 	}
 
 	Source struct {
-		TruthUrl  string `mapstructure:"truth_url"`
-		CheckUrl  string `mapstructure:"check_url"`
-		BaseAsset string `mapstructure:"base_asset"`
+		TruthUrl string `mapstructure:"truth_url"`
+		CheckUrl string `mapstructure:"check_url"`
+		Pools    []Pool `mapstructure:"pools"`
 
 		// should match most of the time
 		Deviation float64 `mapstructure:"deviation"`
 
 		CronInterval string `mapstructure:"cron_interval"`
+	}
+
+	Pool struct {
+		Address      string `mapstructure:"address"`
+		TokenName    string `mapstructure:"token_name"`
+		TokenAddress string `mapstructure:"token_address"`
 	}
 
 	AccessToken struct {
